@@ -263,6 +263,18 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           ["report", "summary"],
           "Task completed. No final report was provided.",
         );
+        // A report is only a report: reject one blatant false success (bounded to
+        // a single correction so this can never become its own loop).
+        const problem = completionCorrections < 1 ? options.checkCompletion?.(finalText) : null;
+        if (problem) {
+          completionCorrections++;
+          records.push({ name, args, result: problem });
+          history = [
+            ...history,
+            { role: "tool", tool_call_id: toolCall.id, content: problem, ts: now() },
+          ];
+          continue;
+        }
         history = [
           ...history,
           { role: "tool", tool_call_id: toolCall.id, content: "Completion recorded.", ts: now() },
