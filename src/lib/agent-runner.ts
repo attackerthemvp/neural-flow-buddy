@@ -243,7 +243,19 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
 
     for (const toolCall of toolCalls) {
       const name = toolCall.function.name;
-      const args = parseArgs(toolCall.function.arguments);
+      const parsed = parseArgs(toolCall.function.arguments);
+
+      // Malformed arguments abort THIS call: nothing is dispatched and the model
+      // is told exactly what to fix.
+      if (!parsed.ok) {
+        records.push({ name, args: {}, result: parsed.error });
+        history = [
+          ...history,
+          { role: "tool", tool_call_id: toolCall.id, content: parsed.error, ts: now() },
+        ];
+        continue;
+      }
+      const args = parsed.args;
 
       if (name === "finish_task") {
         const finalText = controlText(
