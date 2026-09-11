@@ -66,14 +66,36 @@ export type AgentRunOptions = {
 };
 
 
-function parseArgs(raw?: string): Record<string, unknown> {
-  if (!raw) return {};
+type ParsedArgs =
+  | { ok: true; args: Record<string, unknown> }
+  | { ok: false; error: string };
+
+/**
+ * Malformed model JSON must NEVER become `{}` — an empty argument object silently
+ * turns "open WhatsApp" into an argument-less command. It becomes an explicit
+ * validation failure the model can correct instead.
+ */
+function parseArgs(raw?: string): ParsedArgs {
+  if (raw == null || raw.trim() === "") return { ok: true, args: {} };
+  let value: unknown;
   try {
-    const value = JSON.parse(raw);
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch {
-    return {};
+    value = JSON.parse(raw);
+  } catch (e) {
+    return {
+      ok: false,
+      error: `INVALID_TOOL_ARGUMENTS: the arguments were not valid JSON (${
+        e instanceof Error ? e.message : String(e)
+      }). Nothing was executed. Re-send this tool call with a valid JSON object. Raw arguments: ${raw.slice(0, 300)}`,
+    };
   }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return {
+      ok: false,
+      error: `INVALID_TOOL_ARGUMENTS: the arguments must be a JSON object, received ${
+        Array.isArray(value) ? "an array" : typeof value
+      }. Nothing was executed. Re-send this tool call with a valid JSON object.`,
+    };
+  return { ok: true, args: value as Record<string, unknown> };
 }
 
 function controlText(args: Record<string, unknown>, keys: string[], fallback: string) {
