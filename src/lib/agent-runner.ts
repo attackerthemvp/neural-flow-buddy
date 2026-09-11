@@ -63,6 +63,12 @@ export type AgentRunOptions = {
   now?: () => number;
   /** Override for which calls may repeat freely (defaults to tool-policy's list). */
   isRepeatSafe?: (name: string, args: Record<string, unknown>) => boolean;
+  /**
+   * Last-line check on a finish_task report. Return a correction string to
+   * reject a report that contradicts the recorded tool outcomes, or null to
+   * accept it. Applied at most once per run.
+   */
+  checkCompletion?: (report: string) => string | null;
 };
 
 
