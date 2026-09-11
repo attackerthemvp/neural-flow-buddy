@@ -325,3 +325,279 @@ COMPLETION:
 - Once the requested Android operation has been performed (or definitively failed), call finish_task with the outcome. Do not keep reasoning, re-checking or re-listing apps afterwards.
 - request_user_input is ONLY for a genuine blocker: no phone online, a truly unknown app with no resolvable package, or an explicitly destructive action needing approval. Choosing between known package variants is not a blocker.
 - Repeating home / recents / status / foreground_app / wait_for_* checks is fine; repeating an action that already failed the same way is not — change approach or report the blocker.`;
+
+// ---------------------------------------------------------------------------
+// Runtime capability contract (source of truth = the connected phone)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the currently connected NEXUS Android Agent says it can do. Built from a
+ * phone_agent_status() result — never from guesswork. `known` is false until a
+ * status result has actually been parsed, in which case validation must not
+ * reject a capability just because we have not looked yet.
+ */
+export type AndroidCapabilitySnapshot = {
+  capabilities: Set<string>;
+  agentVersion?: string | undefined;
+  online: boolean;
+  known: boolean;
+};
+
+export const UNKNOWN_ANDROID_SNAPSHOT: AndroidCapabilitySnapshot = {
+  capabilities: new Set<string>(),
+  online: false,
+  known: false,
+};
+
+/** Parse a phone_agent_status() tool result into a capability snapshot. */
+export function parseAndroidStatus(raw: string): AndroidCapabilitySnapshot {
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return UNKNOWN_ANDROID_SNAPSHOT;
+  }
+  const agents: any[] = Array.isArray(data?.agents)
+    ? data.agents
+    : Array.isArray(data)
+      ? data
+      : data?.agent
+        ? [data.agent]
+        : [];
+  if (!agents.length) return { capabilities: new Set(), online: false, known: true };
+  const online = agents.find((a) => a?.online === true || a?.connected === true) ?? agents[0];
+  const caps: string[] = Array.isArray(online?.capabilities)
+    ? online.capabilities.filter((c: unknown): c is string => typeof c === "string")
+    : [];
+  return {
+    capabilities: new Set(caps),
+    agentVersion:
+      typeof online?.app_version === "string"
+        ? online.app_version
+        : typeof online?.agent_version === "string"
+          ? online.agent_version
+          : undefined,
+    online: online?.online === true || online?.connected === true,
+    known: true,
+  };
+}
+
+export type PhoneCommandRejection = {
+  ok: false;
+  code:
+    | "MISSING_COMMAND"
+    | "UNKNOWN_CAPABILITY"
+    | "INVALID_ARGUMENTS"
+    | "UNRESOLVED_APP";
+  error: string;
+};
+
+export type PhoneCommandValidation =
+  | { ok: true; command: string; args: Record<string, unknown>; note?: string | undefined }
+  | PhoneCommandRejection;
+
+/**
+ * The single gate every phone_agent_command passes before dispatch: the
+ * capability must be advertised by the connected phone, and — for capabilities
+ * whose schema this repository has actually verified — the argument names must
+ * match exactly. Unverified capabilities keep their arguments untouched; the
+ * phone's own 400 detail stays the source of truth for those.
+ */
+export function validatePhoneCommand(
+  command: unknown,
+  rawArgs: unknown,
+  snapshot: AndroidCapabilitySnapshot = UNKNOWN_ANDROID_SNAPSHOT,
+): PhoneCommandValidation {
+  if (typeof command !== "string" || !command.trim())
+    return { ok: false, code: "MISSING_COMMAND", error: "phone_agent_command requires a 'command' capability name." };
+  const cmd = command.trim();
+
+  if (snapshot.known && snapshot.capabilities.size && !snapshot.capabilities.has(cmd)) {
+    return {
+      ok: false,
+      code: "UNKNOWN_CAPABILITY",
+      error: `UNKNOWN_CAPABILITY: "${cmd}" is not advertised by the connected Android Agent. Advertised capabilities: ${[...snapshot.capabilities].join(", ")}. Pick one of those — do not invent capability names.`,
+    };
+  }
+
+  const argsIn =
+    rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+      ? (rawArgs as Record<string, unknown>)
+      : rawArgs == null
+        ? {}
+        : null;
+  if (argsIn === null)
+    return { ok: false, code: "INVALID_ARGUMENTS", error: `INVALID_ARGUMENTS: args for "${cmd}" must be an object.` };
+
+  const { args, note } = normalizePhoneCommandArgs(cmd, argsIn);
+
+  if (cmd === "open_app") {
+    const pkg = args["package"];
+    if (typeof pkg !== "string" || !pkg.trim())
+      return {
+        ok: false,
+        code: "INVALID_ARGUMENTS",
+        error: 'INVALID_ARGUMENTS: open_app takes exactly {"package": "<package id>"} (not package_name). Resolve the app with android_app_lookup first.',
+      };
+    if (!looksLikePackage(pkg))
+      return {
+        ok: false,
+        code: "UNRESOLVED_APP",
+        error: `UNRESOLVED_APP: "${pkg}" is not a package id and NEXUS has no mapping for it. Call android_app_lookup, or ask the user for the package id. Never invent one.`,
+      };
+  }
+
+  const verified = ANDROID_VERIFIED_ARGS[cmd];
+  if (verified) {
+    const allowed = new Set(Object.keys(verified));
+    const unknownKeys = Object.keys(args).filter((k) => !allowed.has(k));
+    if (unknownKeys.length)
+      return {
+        ok: false,
+        code: "INVALID_ARGUMENTS",
+        error: `INVALID_ARGUMENTS: "${cmd}" accepts only {${[...allowed].join(", ") || "no arguments"}}. Unexpected: ${unknownKeys.join(", ")}.`,
+      };
+  }
+
+  return { ok: true, command: cmd, args, ...(note ? { note } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Intent semantics
+// ---------------------------------------------------------------------------
+
+export type AndroidIntentAction =
+  | "open_app"
+  | "switch_task"
+  | "recents"
+  | "home"
+  | "back"
+  | "terminate"
+  | "unknown";
+
+export type AndroidIntent = {
+  action: AndroidIntentAction;
+  /** The spoken app name, when the phrasing named one. */
+  app?: string | undefined;
+  /** Resolved package when the app mapping knows it. */
+  package?: string | null | undefined;
+  /** How the outcome must be described to the user. */
+  reporting?: string | undefined;
+};
+
+const APP_TAIL = /\s+(?:the\s+)?([a-z0-9 .+&'-]+?)(?:\s+app)?\s*$/i;
+
+function appOf(text: string, verb: RegExp): string | undefined {
+  const rest = text.replace(verb, " ").trim();
+  const m = ` ${rest}`.match(APP_TAIL);
+  const name = (m?.[1] ?? rest).trim();
+  return name || undefined;
+}
+
+/**
+ * Map a spoken Android request to the operation NEXUS must actually perform.
+ * "close X" is a BACKGROUNDING request (home), never a termination.
+ */
+export function interpretAndroidIntent(text: string): AndroidIntent {
+  const t = text.toLowerCase().trim();
+  const withApp = (action: AndroidIntentAction, verb: RegExp, reporting?: string): AndroidIntent => {
+    const app = appOf(t, verb);
+    const resolved = app ? resolveAndroidApp(app).resolved : null;
+    return { action, app, package: resolved, ...(reporting ? { reporting } : {}) };
+  };
+
+  if (/\b(force[- ]?stop|force[- ]?close|kill|terminate)\b/.test(t))
+    return {
+      ...withApp("terminate", /\b(force[- ]?stop|force[- ]?close|kill|terminate)\b/g),
+      reporting: "Only perform real termination when the phone advertises a matching capability; otherwise explain the app can only be backgrounded.",
+    };
+
+  if (/\b(recents|recent apps|app switcher|multitasking|task switcher)\b/.test(t)) {
+    if (/\bswitch to\b|\balready (open|running|in the background)\b|\bback to\b/.test(t))
+      return withApp("switch_task", /\b(switch to|go back to|back to|from|in|the|recents|recent apps|app switcher)\b/g,
+        'Activate the existing Recents card and say "switched"; if the card is not found, a relaunch must be labelled a relaunch.');
+    return { action: "recents" };
+  }
+
+  if (/\bswitch to\b/.test(t))
+    return withApp("switch_task", /\bswitch to\b/g,
+      'Use Recents + click the existing card. Only say "switched" when the existing task was activated.');
+
+  if (/\b(go |return )?(to the )?home( screen)?\b/.test(t) && !/\bopen\b|\blaunch\b|\bstart\b/.test(t))
+    return { action: "home" };
+
+  if (/^\s*(go\s+)?back\b/.test(t) || /\bgo back\b/.test(t)) return { action: "back" };
+
+  if (/\b(open|launch|start|run)\b/.test(t))
+    return withApp("open_app", /\b(open|launch|start|run|up|now|please)\b/g);
+
+  if (/\b(close|exit|leave|quit|minimi[sz]e|background)\b/.test(t))
+    return {
+      ...withApp("home", /\b(close|exit|leave|quit|minimi[sz]e|background)\b/g),
+      reporting: 'Press home. Report "moved out of the foreground" — never "terminated", "killed" or "force-stopped".',
+    };
+
+  return { action: "unknown" };
+}
+
+// ---------------------------------------------------------------------------
+// Evidence-based verification
+// ---------------------------------------------------------------------------
+
+export type AndroidEvidence = {
+  /** foreground_app package; null/"" means the phone reported nothing. */
+  foregroundPackage?: string | null | undefined;
+  /** Raw screen_read text, when one was taken. */
+  screenText?: string | null | undefined;
+};
+
+export type AndroidVerdict = {
+  state: "verified" | "inconclusive" | "conflict" | "failed";
+  detail: string;
+};
+
+/**
+ * Turn dispatch result + whatever evidence exists into ONE honest verdict.
+ * Dispatch success alone is never "verified".
+ */
+export function evaluateAndroidEvidence(
+  expectedPackage: string | null | undefined,
+  evidence: AndroidEvidence,
+  dispatchOk: boolean,
+): AndroidVerdict {
+  if (!dispatchOk)
+    return { state: "failed", detail: "The Android Agent reported an error; the action did not execute." };
+  if (!expectedPackage)
+    return { state: "inconclusive", detail: "No expected package to verify against; report only what the agent returned." };
+
+  const fg = (evidence.foregroundPackage ?? "").trim();
+  const screen = (evidence.screenText ?? "").toLowerCase();
+  const screenSupports = !!screen && screen.includes(expectedPackage.toLowerCase());
+
+  if (fg && fg === expectedPackage)
+    return { state: "verified", detail: `foreground_app reports ${expectedPackage}.` };
+
+  if (!fg) {
+    if (screenSupports)
+      return {
+        state: "verified",
+        detail: `foreground_app returned no package, but screen_read shows ${expectedPackage}'s UI.`,
+      };
+    return {
+      state: "inconclusive",
+      detail:
+        "The Android Agent reported the action succeeded, but foreground_app returned no package, so the foreground app could not be independently confirmed. Do NOT repeat the action.",
+    };
+  }
+
+  if (screenSupports)
+    return {
+      state: "conflict",
+      detail: `foreground_app reports ${fg} while screen_read shows ${expectedPackage}. Report the disagreement instead of claiming success.`,
+    };
+
+  return {
+    state: "conflict",
+    detail: `Expected ${expectedPackage} but foreground_app reports ${fg}. Do not claim success.`,
+  };
+}

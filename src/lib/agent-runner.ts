@@ -63,17 +63,45 @@ export type AgentRunOptions = {
   now?: () => number;
   /** Override for which calls may repeat freely (defaults to tool-policy's list). */
   isRepeatSafe?: (name: string, args: Record<string, unknown>) => boolean;
+  /**
+   * Last-line check on a finish_task report. Return a correction string to
+   * reject a report that contradicts the recorded tool outcomes, or null to
+   * accept it. Applied at most once per run.
+   */
+  checkCompletion?: (report: string) => string | null;
 };
 
 
-function parseArgs(raw?: string): Record<string, unknown> {
-  if (!raw) return {};
+type ParsedArgs =
+  | { ok: true; args: Record<string, unknown> }
+  | { ok: false; error: string };
+
+/**
+ * Malformed model JSON must NEVER become `{}` — an empty argument object silently
+ * turns "open WhatsApp" into an argument-less command. It becomes an explicit
+ * validation failure the model can correct instead.
+ */
+function parseArgs(raw?: string): ParsedArgs {
+  if (raw == null || raw.trim() === "") return { ok: true, args: {} };
+  let value: unknown;
   try {
-    const value = JSON.parse(raw);
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch {
-    return {};
+    value = JSON.parse(raw);
+  } catch (e) {
+    return {
+      ok: false,
+      error: `INVALID_TOOL_ARGUMENTS: the arguments were not valid JSON (${
+        e instanceof Error ? e.message : String(e)
+      }). Nothing was executed. Re-send this tool call with a valid JSON object. Raw arguments: ${raw.slice(0, 300)}`,
+    };
   }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return {
+      ok: false,
+      error: `INVALID_TOOL_ARGUMENTS: the arguments must be a JSON object, received ${
+        Array.isArray(value) ? "an array" : typeof value
+      }. Nothing was executed. Re-send this tool call with a valid JSON object.`,
+    };
+  return { ok: true, args: value as Record<string, unknown> };
 }
 
 function controlText(args: Record<string, unknown>, keys: string[], fallback: string) {
@@ -221,7 +249,19 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
 
     for (const toolCall of toolCalls) {
       const name = toolCall.function.name;
-      const args = parseArgs(toolCall.function.arguments);
+      const parsed = parseArgs(toolCall.function.arguments);
+
+      // Malformed arguments abort THIS call: nothing is dispatched and the model
+      // is told exactly what to fix.
+      if (!parsed.ok) {
+        records.push({ name, args: {}, result: parsed.error });
+        history = [
+          ...history,
+          { role: "tool", tool_call_id: toolCall.id, content: parsed.error, ts: now() },
+        ];
+        continue;
+      }
+      const args = parsed.args;
 
       if (name === "finish_task") {
         const finalText = controlText(
@@ -229,6 +269,18 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           ["report", "summary"],
           "Task completed. No final report was provided.",
         );
+        // A report is only a report: reject one blatant false success (bounded to
+        // a single correction so this can never become its own loop).
+        const problem = completionCorrections < 1 ? options.checkCompletion?.(finalText) : null;
+        if (problem) {
+          completionCorrections++;
+          records.push({ name, args, result: problem });
+          history = [
+            ...history,
+            { role: "tool", tool_call_id: toolCall.id, content: problem, ts: now() },
+          ];
+          continue;
+        }
         history = [
           ...history,
           { role: "tool", tool_call_id: toolCall.id, content: "Completion recorded.", ts: now() },
