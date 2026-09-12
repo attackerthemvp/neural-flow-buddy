@@ -3,7 +3,29 @@ import ReactMarkdown from "react-markdown";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { checkAgentStatus, executeTool } from "@/lib/jarvis-agent";
-import { normalizePhoneCommandArgs, resolveAndroidApp } from "@/lib/android-apps";
+import {
+  ANDROID_REPEAT_SAFE_COMMANDS,
+  resolveAndroidApp,
+  validatePhoneCommand,
+} from "@/lib/android-apps";
+import {
+  checkAndroidCompletion,
+  checkAndroidRetry,
+  getAndroidSnapshot,
+  noteAndroidDispatch,
+  noteAndroidStateCheck,
+  recordAndroidStatus,
+  resetAndroidSession,
+} from "@/lib/android-session";
+
+/** Legacy ADB tools: allowed only when the primary Android Agent path cannot serve. */
+const LEGACY_ADB_TOOLS = new Set([
+  "launch_app",
+  "device_tap",
+  "device_type_text",
+  "device_keyevent",
+  "device_screenshot",
+]);
 import { executeMemoryTool, isMemoryTool } from "@/lib/memory-tools";
 import { executeWebTool, isWebTool } from "@/lib/web-tools";
 import { relevantMemories } from "@/lib/memory-store";
@@ -273,6 +295,8 @@ export function JarvisChat({
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      // Android retry budgets and the last outcome are per-run state.
+      resetAndroidSession();
 
       try {
         const result = await runAgent({
@@ -282,6 +306,8 @@ export function JarvisChat({
           signal: ctrl.signal,
           toolTimeoutMs: Math.max(120, settingsRef.current.coding.commandTimeoutSec + 60) * 1000,
           callModel: (currentHistory) => callModel(currentHistory, memories),
+          // A finish_task report cannot outrank a failed Android command.
+          checkCompletion: checkAndroidCompletion,
 
 
           executeTool: async (fname, args): Promise<ToolExecution> => {
@@ -314,16 +340,36 @@ export function JarvisChat({
                 }),
               };
             }
-            // Enforce the verified Android Agent argument schema (open_app → {package}).
+            // --- Android command boundary: capability + argument validation, then
+            // a state-aware retry gate. Nothing reaches the phone unvalidated.
             let phoneNote: string | undefined;
-            if (fname === "phone_agent_command" && typeof args["command"] === "string") {
-              const fixed = normalizePhoneCommandArgs(
-                args["command"],
-                args["args"] && typeof args["args"] === "object" ? (args["args"] as Record<string, unknown>) : undefined,
-              );
-              if (fixed.note) {
-                phoneNote = fixed.note;
-                args = { ...args, args: fixed.args };
+            let phoneCommand: string | undefined;
+            let phoneRepeatSafe = false;
+            if (fname === "phone_agent_command") {
+              const snapshot = getAndroidSnapshot();
+              const verdict = validatePhoneCommand(args["command"], args["args"], snapshot);
+              if (!verdict.ok) {
+                logAgent({ kind: "error", label: fname, args, ok: false, detail: verdict.error });
+                return { content: `ERROR: ${verdict.error}` };
+              }
+              phoneCommand = verdict.command;
+              phoneRepeatSafe = ANDROID_REPEAT_SAFE_COMMANDS.has(verdict.command);
+              args = { ...args, command: verdict.command, args: verdict.args };
+              if (verdict.note) phoneNote = verdict.note;
+              const retry = checkAndroidRetry(verdict.command, verdict.args, phoneRepeatSafe);
+              if (!retry.allow) {
+                logAgent({ kind: "error", label: fname, args, ok: false, detail: retry.error });
+                return { content: `ERROR: ${retry.error}` };
+              }
+            }
+            // ADB stays legacy: never silently take over from a live Android Agent.
+            if (LEGACY_ADB_TOOLS.has(fname)) {
+              const snapshot = getAndroidSnapshot();
+              if (snapshot.online && args["force_adb"] !== true) {
+                const msg =
+                  "ERROR: ADB_NOT_PRIMARY: a NEXUS Android Agent is online, so use the phone_* path (phone_agent_command) instead of the legacy ADB tools. Only use ADB when the user explicitly asks for it, no agent is online, or the capability is genuinely absent from the phone's advertised list — and say so.";
+                logAgent({ kind: "error", label: fname, args, ok: false, detail: msg });
+                return { content: msg };
               }
             }
             // Security / Computer / Devices / Memory / Coding settings are enforced here.
@@ -361,6 +407,17 @@ export function JarvisChat({
               durationMs: Date.now() - startedAt,
               detail: result.slice(0, 600),
             });
+            // The phone's own status answer is the runtime capability contract.
+            if (fname === "phone_agent_status" && !result.startsWith("ERROR")) recordAndroidStatus(result);
+            if (fname === "phone_info" || fname === "phone_ping") noteAndroidStateCheck();
+            if (phoneCommand)
+              noteAndroidDispatch(
+                phoneCommand,
+                (args["args"] as Record<string, unknown>) ?? {},
+                !result.startsWith("ERROR"),
+                result.slice(0, 200),
+                phoneRepeatSafe,
+              );
             let content = phoneNote ? `[schema note] ${phoneNote}\n${result}` : result;
             let attachment: Msg | undefined;
             try {

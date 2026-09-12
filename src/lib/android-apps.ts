@@ -324,7 +324,15 @@ COMPLETION:
 - Simple Android commands are one-shot tasks: resolve → act → verify once → finish_task in the SAME run. Do not narrate what you are about to do and stop; do not wait for a "continue".
 - Once the requested Android operation has been performed (or definitively failed), call finish_task with the outcome. Do not keep reasoning, re-checking or re-listing apps afterwards.
 - request_user_input is ONLY for a genuine blocker: no phone online, a truly unknown app with no resolvable package, or an explicitly destructive action needing approval. Choosing between known package variants is not a blocker.
-- Repeating home / recents / status / foreground_app / wait_for_* checks is fine; repeating an action that already failed the same way is not — change approach or report the blocker.`;
+- Repeating home / recents / status / foreground_app / wait_for_* checks is fine; repeating an action that already failed the same way is not — change approach or report the blocker.
+
+CONTROLLER ENFORCEMENT (these are validated in code, not just advice):
+- A capability that is not in the connected phone's advertised list is REJECTED before dispatch (UNKNOWN_CAPABILITY). Call phone_agent_status once per run so the allow-list is known.
+- Wrong argument names are REJECTED (INVALID_ARGUMENTS); open_app without a real package id is REJECTED (UNRESOLVED_APP). Malformed tool JSON is REJECTED (INVALID_TOOL_ARGUMENTS) and nothing runs — resend valid JSON.
+- Repeating a failed state-changing command without checking anything is REJECTED (ANDROID_BLIND_RETRY), and the same failing command is refused after two attempts (ANDROID_RETRY_EXHAUSTED).
+- A finish_task report that claims success after a failed Android command is REJECTED (FALSE_COMPLETION).
+- Legacy ADB device_* tools are REJECTED while an Android Agent is online (ADB_NOT_PRIMARY).
+- SPEED: one command + ONE verification. Do not chain foreground_app + screen_read + wait_for_app unless the evidence actually disagrees.`;
 
 // ---------------------------------------------------------------------------
 // Runtime capability contract (source of truth = the connected phone)

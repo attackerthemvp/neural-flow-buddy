@@ -302,3 +302,116 @@ describe("task completion", () => {
     expect(nudges.every((m) => m.internal === true)).toBe(true);
   });
 });
+
+describe("malformed tool arguments", () => {
+  test("invalid JSON is a validation failure, not empty arguments", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    let calls = 0;
+    const result = await runAgent({
+      initialHistory: start,
+      callModel: async () => {
+        calls++;
+        if (calls === 1)
+          return {
+            choices: [
+              {
+                message: {
+                  content: "",
+                  tool_calls: [
+                    { id: "bad", function: { name: "phone_agent_command", arguments: '{"command":"open_app",' } },
+                  ],
+                },
+              },
+            ],
+          };
+        return response("", [{ id: "d", name: "finish_task", args: { report: "Recovered." } }]);
+      },
+      executeTool: async (_name, args) => {
+        seen.push(args);
+        return { content: "ok" };
+      },
+    });
+    expect(seen).toEqual([]);
+    expect(result.status).toBe("completed");
+    expect(
+      result.history.some(
+        (m) => typeof m.content === "string" && m.content.includes("INVALID_TOOL_ARGUMENTS"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a non-object argument payload is rejected too", async () => {
+    let calls = 0;
+    let executions = 0;
+    const result = await runAgent({
+      initialHistory: start,
+      callModel: async () => {
+        calls++;
+        if (calls === 1)
+          return {
+            choices: [
+              {
+                message: {
+                  content: "",
+                  tool_calls: [{ id: "arr", function: { name: "run_command", arguments: "[1,2]" } }],
+                },
+              },
+            ],
+          };
+        return response("", [{ id: "d", name: "finish_task", args: { report: "ok" } }]);
+      },
+      executeTool: async () => {
+        executions++;
+        return { content: "ok" };
+      },
+    });
+    expect(executions).toBe(0);
+    expect(result.status).toBe("completed");
+  });
+});
+
+describe("completion guard", () => {
+  test("a false-success report is corrected once, then accepted", async () => {
+    let calls = 0;
+    const result = await runAgent({
+      initialHistory: start,
+      checkCompletion: (report) =>
+        report.includes("successfully") ? "FALSE_COMPLETION: the last Android command failed." : null,
+      callModel: async () => {
+        calls++;
+        if (calls === 1) return response("", [{ id: "1", name: "phone_agent_command", args: { command: "open_app" } }]);
+        if (calls === 2)
+          return response("", [{ id: "2", name: "finish_task", args: { report: "WhatsApp opened successfully." } }]);
+        return response("", [
+          { id: "3", name: "finish_task", args: { report: "The launch failed: 503 not connected." } },
+        ]);
+      },
+      executeTool: async () => ({ content: "ERROR: 503 not connected" }),
+    });
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe("The launch failed: 503 not connected.");
+    expect(
+      result.history.some((m) => typeof m.content === "string" && m.content.includes("FALSE_COMPLETION")),
+    ).toBe(true);
+  });
+
+  test("simple Android runs finish without any user continue", async () => {
+    let calls = 0;
+    const result = await runAgent({
+      initialHistory: [{ role: "user", content: "open YT" }],
+      callModel: async () => {
+        calls++;
+        if (calls === 1)
+          return response("", [
+            { id: "1", name: "phone_agent_command", args: { command: "open_app", args: { package: "com.google.android.youtube" } } },
+          ]);
+        if (calls === 2)
+          return response("", [{ id: "2", name: "phone_agent_command", args: { command: "foreground_app" } }]);
+        return response("", [{ id: "3", name: "finish_task", args: { report: "YouTube verified in the foreground." } }]);
+      },
+      executeTool: async () => ({ content: '{"package":"com.google.android.youtube"}' }),
+    });
+    expect(result.status).toBe("completed");
+    expect(calls).toBe(3);
+  });
+});
