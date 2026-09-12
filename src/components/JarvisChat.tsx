@@ -304,6 +304,8 @@ export function JarvisChat({
           signal: ctrl.signal,
           toolTimeoutMs: Math.max(120, settingsRef.current.coding.commandTimeoutSec + 60) * 1000,
           callModel: (currentHistory) => callModel(currentHistory, memories),
+          // A finish_task report cannot outrank a failed Android command.
+          checkCompletion: checkAndroidCompletion,
 
 
           executeTool: async (fname, args): Promise<ToolExecution> => {
