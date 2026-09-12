@@ -295,6 +295,8 @@ export function JarvisChat({
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      // Android retry budgets and the last outcome are per-run state.
+      resetAndroidSession();
 
       try {
         const result = await runAgent({
