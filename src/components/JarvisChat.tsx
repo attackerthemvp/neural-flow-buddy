@@ -403,6 +403,17 @@ export function JarvisChat({
               durationMs: Date.now() - startedAt,
               detail: result.slice(0, 600),
             });
+            // The phone's own status answer is the runtime capability contract.
+            if (fname === "phone_agent_status" && !result.startsWith("ERROR")) recordAndroidStatus(result);
+            if (fname === "phone_info" || fname === "phone_ping") noteAndroidStateCheck();
+            if (phoneCommand)
+              noteAndroidDispatch(
+                phoneCommand,
+                (args["args"] as Record<string, unknown>) ?? {},
+                !result.startsWith("ERROR"),
+                result.slice(0, 200),
+                phoneRepeatSafe,
+              );
             let content = phoneNote ? `[schema note] ${phoneNote}\n${result}` : result;
             let attachment: Msg | undefined;
             try {
