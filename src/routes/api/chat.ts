@@ -522,12 +522,12 @@ export const Route = createFileRoute("/api/chat")({
               type: "function",
               function: {
                 name: "phone_agent_command",
-                description: "Run ONE capability on the phone through the NEXUS Android Agent app. Only names in that phone's capability allow-list work (call phone_agent_status first to read them) — there is no shell on the phone. Errors: 400 unsupported_command, 503 no phone connected, 504 phone did not answer.",
+                description: "Run ONE capability on the phone through the NEXUS Android Agent app. The capability name MUST come from phone_agent_status().agents[].capabilities — NEXUS validates it and rejects anything else before it reaches the phone, along with wrong argument names. There is no shell on the phone. Errors: UNKNOWN_CAPABILITY / INVALID_ARGUMENTS (rejected locally), 503 no phone connected, 504 phone did not answer.",
                 parameters: {
                   type: "object",
                   properties: {
                     command: { type: "string", description: "Capability name from the phone's advertised capabilities list" },
-                    args: { type: "object", description: "Arguments for that capability. Verified: open_app takes {package} (NOT package_name); home/back/device_info take {}; ping takes {echo?}." },
+                    args: { type: "object", description: "Arguments for that capability. Verified schemas, enforced: open_app takes exactly {package} (NOT package_name); home/back/device_info take {}; ping takes {echo?}. For capabilities without a verified schema, use the names the phone reports in its error detail — never invent argument names." },
                     timeout_sec: { type: "integer", description: "How long to wait for the phone (1-120, default 30)" }
                   },
                   required: ["command"]
