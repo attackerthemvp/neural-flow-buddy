@@ -138,6 +138,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   const maxEmptyReplies = options.maxEmptyReplies ?? DEFAULT_MAX_EMPTY_REPLIES;
   const maxContinueNudges = options.maxContinueNudges ?? DEFAULT_MAX_CONTINUE_NUDGES;
   let continueNudges = 0;
+  let completionCorrections = 0;
   const now = options.now ?? Date.now;
   const startedAt = now();
   const callCounts = new Map<string, number>();
