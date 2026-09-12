@@ -3,7 +3,29 @@ import ReactMarkdown from "react-markdown";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { checkAgentStatus, executeTool } from "@/lib/jarvis-agent";
-import { normalizePhoneCommandArgs, resolveAndroidApp } from "@/lib/android-apps";
+import {
+  ANDROID_REPEAT_SAFE_COMMANDS,
+  resolveAndroidApp,
+  validatePhoneCommand,
+} from "@/lib/android-apps";
+import {
+  checkAndroidCompletion,
+  checkAndroidRetry,
+  getAndroidSnapshot,
+  noteAndroidDispatch,
+  noteAndroidStateCheck,
+  recordAndroidStatus,
+  resetAndroidSession,
+} from "@/lib/android-session";
+
+/** Legacy ADB tools: allowed only when the primary Android Agent path cannot serve. */
+const LEGACY_ADB_TOOLS = new Set([
+  "launch_app",
+  "device_tap",
+  "device_type_text",
+  "device_keyevent",
+  "device_screenshot",
+]);
 import { executeMemoryTool, isMemoryTool } from "@/lib/memory-tools";
 import { executeWebTool, isWebTool } from "@/lib/web-tools";
 import { relevantMemories } from "@/lib/memory-store";
