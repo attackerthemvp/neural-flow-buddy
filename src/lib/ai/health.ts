@@ -31,7 +31,7 @@ function s(id: ProviderId): Stats {
 export function hasSecret(id: ProviderId): boolean {
   const cfg = getProviderConfig(id);
   if (!cfg) return false;
-  return Boolean(process.env[cfg.secretName]);
+  return providerApiKeys(cfg).length > 0;
 }
 
 export function recordSuccess(id: ProviderId, latencyMs: number) {

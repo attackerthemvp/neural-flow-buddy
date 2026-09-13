@@ -1,6 +1,6 @@
 // NEXUS AI Router — task classification, provider/model selection, health-aware
 // fallback, cooldowns and normalized responses.
-import { MAX_PROVIDER_ATTEMPTS, PROVIDERS } from "./config";
+import { MAX_PROVIDER_ATTEMPTS, nextProviderApiKey, PROVIDERS } from "./config";
 import { classify } from "./classifier";
 import { ACTIVE_MODEL_TOKEN } from "./persona";
 import {
