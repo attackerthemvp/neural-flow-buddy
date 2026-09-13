@@ -107,7 +107,7 @@ export async function routeChat(params: {
 
   for (const cfg of order) {
     if (attemptCount >= maxAttempts) break;
-    const apiKey = process.env[cfg.secretName];
+    const apiKey = nextProviderApiKey(cfg);
     if (!apiKey) continue;
 
     let models = eligibleModels(cfg, required, preferred, task);
