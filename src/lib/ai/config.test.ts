@@ -23,20 +23,20 @@ describe("multi-key provider slots", () => {
   });
 
   it("keeps single-key setups working (slot 1 only)", () => {
-    process.env.TESTPROV_KEY = "a";
+    process.env['TESTPROV_KEY'] = "a";
     expect(providerApiKeys(testCfg())).toEqual(["a"]);
   });
 
   it("collects only the configured slots, in order", () => {
-    process.env.TESTPROV_KEY_2 = "b";
-    process.env.TESTPROV_KEY_4 = "d";
+    process.env['TESTPROV_KEY']_2 = "b";
+    process.env['TESTPROV_KEY']_4 = "d";
     expect(providerApiKeys(testCfg())).toEqual(["b", "d"]);
   });
 
   it("rotates keys round-robin across calls", () => {
-    process.env.TESTPROV_KEY = "a";
-    process.env.TESTPROV_KEY_2 = "b";
-    process.env.TESTPROV_KEY_3 = "c";
+    process.env['TESTPROV_KEY'] = "a";
+    process.env['TESTPROV_KEY']_2 = "b";
+    process.env['TESTPROV_KEY']_3 = "c";
     const cfg = testCfg();
     expect([nextProviderApiKey(cfg), nextProviderApiKey(cfg), nextProviderApiKey(cfg), nextProviderApiKey(cfg)])
       .toEqual(["a", "b", "c", "a"]);
