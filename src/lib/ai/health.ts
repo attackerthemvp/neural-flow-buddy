@@ -1,6 +1,6 @@
 // Provider health monitor. In-memory per server instance; cheap and dependency-free.
 import type { ErrorCategory, ProviderId, ProviderState } from "./types";
-import { getProviderConfig, PROVIDERS } from "./config";
+import { getProviderConfig, PROVIDERS, providerApiKeys } from "./config";
 
 interface Stats {
   successes: number;
@@ -31,7 +31,7 @@ function s(id: ProviderId): Stats {
 export function hasSecret(id: ProviderId): boolean {
   const cfg = getProviderConfig(id);
   if (!cfg) return false;
-  return Boolean(process.env[cfg.secretName]);
+  return providerApiKeys(cfg).length > 0;
 }
 
 export function recordSuccess(id: ProviderId, latencyMs: number) {
