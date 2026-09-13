@@ -1,6 +1,6 @@
 // Provider health monitor. In-memory per server instance; cheap and dependency-free.
 import type { ErrorCategory, ProviderId, ProviderState } from "./types";
-import { getProviderConfig, PROVIDERS } from "./config";
+import { getProviderConfig, PROVIDERS, providerApiKeys } from "./config";
 
 interface Stats {
   successes: number;

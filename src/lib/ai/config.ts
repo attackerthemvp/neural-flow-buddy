@@ -270,3 +270,35 @@ export const MAX_PROVIDER_ATTEMPTS = 6;
 export function getProviderConfig(id: string) {
   return PROVIDERS.find((p) => p.id === id);
 }
+
+/** Extra credential slots per provider: <PRIMARY>_2, <PRIMARY>_3, <PRIMARY>_4. */
+export const PROVIDER_KEY_SLOTS = 4;
+
+/**
+ * All env var names that may hold a key for this provider, in priority order.
+ * Slot 1 is the original secretName — existing single-key setups keep working.
+ */
+export function providerKeyNames(cfg: ProviderConfig): string[] {
+  return Array.from({ length: PROVIDER_KEY_SLOTS }, (_, i) =>
+    i === 0 ? cfg.secretName : `${cfg.secretName}_${i + 1}`,
+  );
+}
+
+/** Every configured (non-empty) key for this provider, in slot order. */
+export function providerApiKeys(cfg: ProviderConfig): string[] {
+  return providerKeyNames(cfg)
+    .map((name) => process.env[name])
+    .filter((k): k is string => Boolean(k));
+}
+
+// Round-robin cursor per provider so repeated requests spread across keys.
+const keyCursor = new Map<string, number>();
+
+/** Next key for a provider call; rotates across the configured slots. */
+export function nextProviderApiKey(cfg: ProviderConfig): string | undefined {
+  const keys = providerApiKeys(cfg);
+  if (!keys.length) return undefined;
+  const i = (keyCursor.get(cfg.id) ?? 0) % keys.length;
+  keyCursor.set(cfg.id, i + 1);
+  return keys[i];
+}
