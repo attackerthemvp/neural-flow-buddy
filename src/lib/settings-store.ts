@@ -2,7 +2,15 @@
 // Storage: browser localStorage (same persistence layer as chats & memory).
 // NEVER stores secrets — API keys live only in server-side environment secrets.
 
-export type ProviderIdSetting = "" | "gemini" | "lovable" | "openrouter" | "cerebras" | "grok";
+export type ProviderIdSetting =
+  | ""
+  | "gemini"
+  | "lovable"
+  | "openrouter"
+  | "cerebras"
+  | "grok"
+  | "groq"
+  | "ollama";
 
 export type NexusSettings = {
   general: {
