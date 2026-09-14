@@ -32,6 +32,8 @@ export type NexusSettings = {
     failover: boolean;
     /** Hard cap on provider/model attempts per request. */
     maxAttempts: number;
+    /** Optional custom Ollama host (empty = 127.0.0.1:11434 on this machine). */
+    ollamaBaseUrl: string;
   };
   voice: {
     inputEnabled: boolean;
