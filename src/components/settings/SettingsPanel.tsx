@@ -402,13 +402,12 @@ export function SettingsPanel({
                     />
                     <ActionRow
                       label="Refresh model list"
-                      description="Re-runs the equivalent of `ollama list` and updates the pinned-model options."
-                      action={
-                        <HudButton onClick={() => void scanOllama()} disabled={ollamaScanning}>
-                          {ollamaScanning ? "SCANNING…" : "REFRESH"}
-                        </HudButton>
-                      }
-                    />
+                      description="Re-reads the models installed on your PC and updates the pinned-model options."
+                    >
+                      <HudButton onClick={() => void scanOllama()}>
+                        {ollamaScanning ? "SCANNING…" : "REFRESH"}
+                      </HudButton>
+                    </ActionRow>
                   </Group>
 
                   <Group title="PROVIDER HEALTH" hint="Live router telemetry. API keys are stored server-side only.">
