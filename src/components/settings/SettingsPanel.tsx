@@ -30,6 +30,12 @@ import {
   AGENT_URLS,
   checkAgentStatus,
 } from "@/lib/jarvis-agent";
+import {
+  OLLAMA_DEFAULT_URLS,
+  listOllamaModels,
+  resolveOllamaBase,
+  type OllamaModel,
+} from "@/lib/ai/ollama";
 import { listSpeechVoices } from "@/hooks/useVoice";
 import { useSettings } from "@/hooks/useSettings";
 import {
@@ -100,6 +106,22 @@ export function SettingsPanel({
   const [createBranch, setCreateBranch] = useState(false);
   const [codingBusy, setCodingBusy] = useState<string | null>(null);
   const [codingResult, setCodingResult] = useState<{ ok: boolean; summary: string } | null>(null);
+  // Local Ollama: discovered from this browser (the server can't reach the PC).
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+  const [ollamaBase, setOllamaBase] = useState<string | null>(null);
+  const [ollamaScanning, setOllamaScanning] = useState(false);
+
+  const ollamaUrl = settings.ai.ollamaBaseUrl;
+  const scanOllama = async () => {
+    setOllamaScanning(true);
+    try {
+      const base = await resolveOllamaBase(ollamaUrl);
+      setOllamaBase(base);
+      setOllamaModels(base ? await listOllamaModels(ollamaUrl) : []);
+    } finally {
+      setOllamaScanning(false);
+    }
+  };
 
   async function runCoding(label: string, fn: () => Promise<{ ok: boolean; summary: string }>) {
     if (codingBusy) return;
@@ -162,7 +184,26 @@ export function SettingsPanel({
   const chatCount = useMemo(() => (open ? listChats().length : 0), [open]);
   const memoryCount = useMemo(() => (open ? listMemories().length : 0), [open]);
 
-  const pinnedProvider = providers.find((p) => p.id === settings.ai.providerId);
+  // Ollama is a first-class provider in this list, but its models come from
+  // `ollama list` on the user's machine instead of the server-side registry.
+  const ollamaProvider: ProviderInfo = {
+    id: "ollama",
+    name: "Ollama (local)",
+    state: ollamaBase ? "HEALTHY" : "OFFLINE",
+    configured: Boolean(ollamaBase),
+    role: "local",
+    priority: 0,
+    successRate: null,
+    avgLatencyMs: null,
+    models: ollamaModels.map((m) => ({
+      id: m.id,
+      label: m.detail ? `${m.label} — ${m.detail}` : m.label,
+      capabilities: ["tools", "coding", "reasoning"],
+      usable: true,
+    })),
+  };
+  const allProviders = [...providers, ollamaProvider];
+  const pinnedProvider = allProviders.find((p) => p.id === settings.ai.providerId);
   const currentSection = SECTIONS.find((s) => s.id === section)!;
 
   if (!open) return null;
