@@ -126,7 +126,14 @@ export type SettingsSection = keyof NexusSettings;
 
 export const DEFAULT_SETTINGS: NexusSettings = {
   general: { startupChat: "last", sendOnEnter: true, confirmChatDelete: true },
-  ai: { autoRouting: true, providerId: "", modelId: "", failover: true, maxAttempts: 6 },
+  ai: {
+    autoRouting: true,
+    providerId: "",
+    modelId: "",
+    failover: true,
+    maxAttempts: 6,
+    ollamaBaseUrl: "",
+  },
   voice: {
     inputEnabled: true,
     outputEnabled: true,
