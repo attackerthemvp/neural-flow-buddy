@@ -586,6 +586,23 @@ export const Route = createFileRoute("/api/chat")({
               : SYSTEM_PROMPT) + codingContext;
 
 
+          // Ollama runs on the user's own PC and is unreachable from this server.
+          // When it is the pinned provider, hand the fully prepared request back to
+          // the browser, which calls localhost:11434 directly. Prompt building and
+          // tool gating above stay exactly the same.
+          if (ai?.providerId === "ollama" && ai?.autoRouting === false) {
+            return new Response(
+              JSON.stringify({
+                _nexus_local: {
+                  provider: "ollama",
+                  messages: [{ role: "system", content: systemContent }, ...messages],
+                  tools: allowedTools,
+                },
+              }),
+              { headers: { "Content-Type": "application/json" } },
+            );
+          }
+
           const { response, attempts } = await routeChat({
             messages: [{ role: "system", content: systemContent }, ...messages],
             tools: allowedTools,
