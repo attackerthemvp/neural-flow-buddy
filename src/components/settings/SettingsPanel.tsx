@@ -166,6 +166,7 @@ export function SettingsPanel({
       .then((r) => r.json())
       .then((d) => alive && setProviders(d.providers ?? []))
       .catch(() => {});
+    void scanOllama();
     setVoices(listSpeechVoices());
     const onVoices = () => setVoices(listSpeechVoices());
     if (typeof window !== "undefined" && "speechSynthesis" in window)
@@ -319,7 +320,7 @@ export function SettingsPanel({
                       disabled={settings.ai.autoRouting}
                       options={[
                         { value: "", label: "— none —" },
-                        ...providers.map((p) => ({
+                        ...allProviders.map((p) => ({
                           value: p.id as typeof settings.ai.providerId,
                           label: `${p.name}${p.configured ? "" : " (no key)"}`,
                         })),
@@ -364,6 +365,50 @@ export function SettingsPanel({
                   <Group title="ACTIVE ROUTE">
                     <StatusRow label="Current provider" value={activeProvider ?? "—"} />
                     <StatusRow label="Current model" value={activeModel ?? "—"} />
+                  </Group>
+
+                  <Group
+                    title="OLLAMA (LOCAL PC)"
+                    hint="Runs on your own machine, so NEXUS calls it straight from this browser. No API key. Pin it above to make it primary."
+                  >
+                    <StatusRow
+                      label="Ollama"
+                      value={
+                        ollamaScanning
+                          ? "scanning…"
+                          : ollamaBase
+                            ? `online · ${ollamaBase}`
+                            : `offline (${(ollamaUrl || OLLAMA_DEFAULT_URLS[0]) ?? ""})`
+                      }
+                      ok={Boolean(ollamaBase)}
+                    />
+                    <StatusRow
+                      label="Installed models"
+                      value={
+                        ollamaModels.length
+                          ? ollamaModels.map((m) => m.id).join(", ")
+                          : ollamaBase
+                            ? "none — run: ollama pull <model>"
+                            : "—"
+                      }
+                      ok={ollamaModels.length > 0}
+                    />
+                    <TextRow
+                      label="Ollama address"
+                      description="Leave empty for http://127.0.0.1:11434 on this machine."
+                      value={settings.ai.ollamaBaseUrl}
+                      placeholder="http://127.0.0.1:11434"
+                      onChange={(v) => updateSection("ai", { ollamaBaseUrl: v })}
+                    />
+                    <ActionRow
+                      label="Refresh model list"
+                      description="Re-runs the equivalent of `ollama list` and updates the pinned-model options."
+                      action={
+                        <HudButton onClick={() => void scanOllama()} disabled={ollamaScanning}>
+                          {ollamaScanning ? "SCANNING…" : "REFRESH"}
+                        </HudButton>
+                      }
+                    />
                   </Group>
 
                   <Group title="PROVIDER HEALTH" hint="Live router telemetry. API keys are stored server-side only.">
