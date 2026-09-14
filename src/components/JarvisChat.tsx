@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { checkAgentStatus, executeTool } from "@/lib/jarvis-agent";
+import { callOllamaChat } from "@/lib/ai/ollama";
 import {
   ANDROID_REPEAT_SAFE_COMMANDS,
   resolveAndroidApp,
@@ -203,7 +204,21 @@ export function JarvisChat({
           const err = await r.json().catch(() => ({ error: "Unknown" }));
           throw new Error(err.error || `HTTP ${r.status}`);
         }
-        return await r.json();
+        const data = await r.json();
+        // Ollama lives on the user's PC: the server prepared the prompt/tools and
+        // the browser performs the completion locally.
+        if (data?._nexus_local?.provider === "ollama") {
+          const ai = settingsRef.current.ai;
+          const opts: Parameters<typeof callOllamaChat>[0] = {
+            messages: data._nexus_local.messages,
+            tools: data._nexus_local.tools ?? [],
+          };
+          if (ai.modelId) opts.modelId = ai.modelId;
+          if (ai.ollamaBaseUrl) opts.baseUrl = ai.ollamaBaseUrl;
+          if (abortRef.current?.signal) opts.signal = abortRef.current.signal;
+          return await callOllamaChat(opts);
+        }
+        return data;
       } catch (e) {
         lastError = e;
         const aborted = e instanceof Error && e.name === "AbortError";

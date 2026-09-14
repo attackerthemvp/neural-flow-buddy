@@ -2,7 +2,15 @@
 // Storage: browser localStorage (same persistence layer as chats & memory).
 // NEVER stores secrets — API keys live only in server-side environment secrets.
 
-export type ProviderIdSetting = "" | "gemini" | "lovable" | "openrouter" | "cerebras" | "grok";
+export type ProviderIdSetting =
+  | ""
+  | "gemini"
+  | "lovable"
+  | "openrouter"
+  | "cerebras"
+  | "grok"
+  | "groq"
+  | "ollama";
 
 export type NexusSettings = {
   general: {
@@ -24,6 +32,8 @@ export type NexusSettings = {
     failover: boolean;
     /** Hard cap on provider/model attempts per request. */
     maxAttempts: number;
+    /** Optional custom Ollama host (empty = 127.0.0.1:11434 on this machine). */
+    ollamaBaseUrl: string;
   };
   voice: {
     inputEnabled: boolean;
@@ -116,7 +126,14 @@ export type SettingsSection = keyof NexusSettings;
 
 export const DEFAULT_SETTINGS: NexusSettings = {
   general: { startupChat: "last", sendOnEnter: true, confirmChatDelete: true },
-  ai: { autoRouting: true, providerId: "", modelId: "", failover: true, maxAttempts: 6 },
+  ai: {
+    autoRouting: true,
+    providerId: "",
+    modelId: "",
+    failover: true,
+    maxAttempts: 6,
+    ollamaBaseUrl: "",
+  },
   voice: {
     inputEnabled: true,
     outputEnabled: true,
