@@ -20,7 +20,14 @@ export type Capability =
   | "long_context"
   | "fast";
 
-export type ProviderId = "gemini" | "lovable" | "openrouter" | "cerebras" | "grok" | "groq";
+export type ProviderId =
+  | "gemini"
+  | "lovable"
+  | "openrouter"
+  | "cerebras"
+  | "grok"
+  | "groq"
+  | "kilo";
 
 export type ProviderState =
   | "HEALTHY"

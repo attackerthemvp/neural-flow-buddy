@@ -8,6 +8,7 @@ export type ProviderIdSetting =
   | "lovable"
   | "openrouter"
   | "cerebras"
+  | "kilo"
   | "grok"
   | "groq"
   | "ollama";
